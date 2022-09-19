@@ -1,6 +1,7 @@
 use gtk::gio::ApplicationFlags;
 use gtk::{AccelGroup, Application, CheckMenuItem, IconSize, Image, Label, Menu, MenuBar, MenuItem};
 use gtk::prelude::*;
+use crate::nemo_places_sidebar::nemo_places_sidebar_init;
 
 fn build_ui(application: &gtk::Application) {
     let window = gtk::ApplicationWindow::new(application);
@@ -59,8 +60,9 @@ fn build_ui(application: &gtk::Application) {
     other.set_submenu(Some(&other_menu));
     menu_bar.append(&other);
 
-    v_box.pack_start(&menu_bar, false, false, 0);
-    v_box.pack_start(&label, true, true, 0);
+    // v_box.pack_start(&menu_bar, false, false, 0);
+    // v_box.pack_start(&label, true, true, 0);
+    v_box.pack_start(&nemo_places_sidebar_init(), true, true, 0);
     window.add(&v_box);
     window.show_all();
 }
