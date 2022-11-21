@@ -826,15 +826,22 @@ custom_basename_to_string (char *format, va_list va)
 		g_object_unref (info);
 	}
 
-	if (name == NULL) {
-		basename = g_file_get_basename (file);
-		if (g_utf8_validate (basename, -1, NULL)) {
-			name = basename;
-		} else {
-			name = g_uri_escape_string (basename, G_URI_RESERVED_CHARS_ALLOWED_IN_PATH, TRUE);
-			g_free (basename);
-		}
-	}
+    if (name == NULL) {
+        basename = g_file_get_basename (file);
+
+        if (basename != NULL) {
+            if (g_utf8_validate (basename, -1, NULL)) {
+                name = basename;
+            } else {
+                name = g_uri_escape_string (basename, G_URI_RESERVED_CHARS_ALLOWED_IN_PATH, TRUE);
+                g_free (basename);
+            }
+        }
+    }
+
+    if (name == NULL) {
+        name = g_file_get_parse_name (file);
+    }
 
 	/* Some chars can't be put in the markup we use for the dialogs... */
 	if (has_invalid_xml_char (name)) {
@@ -954,6 +961,10 @@ get_best_name (GFile *file, gchar **name)
         g_free (path);
     } else {
         out = g_file_get_basename (file);
+
+        if (out == NULL) {
+            out = g_file_get_parse_name (file);
+        }
     }
 
     *name = out;
@@ -4230,7 +4241,7 @@ is_trusted_desktop_file (GFile *file,
 	}
 
 	basename = g_file_get_basename (file);
-	if (!g_str_has_suffix (basename, ".desktop")) {
+	if (basename && !g_str_has_suffix (basename, ".desktop")) {
 		g_free (basename);
 		return FALSE;
 	}

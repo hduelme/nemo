@@ -2259,7 +2259,7 @@ update_info_internal (NemoFile *file,
 	int uid, gid;
 	goffset size;
 	int sort_order;
-	time_t atime, mtime, ctime;
+	time_t atime, mtime, ctime, btime;
 	time_t trash_time;
 	GTimeVal g_trash_time;
 	const char * time_string;
@@ -2549,10 +2549,12 @@ update_info_internal (NemoFile *file,
 
 	atime = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_TIME_ACCESS);
 	ctime = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_TIME_CHANGED);
-	mtime = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_TIME_MODIFIED);
+    mtime = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_TIME_MODIFIED);
+	btime = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_TIME_CREATED);
 	if (file->details->atime != atime ||
 	    file->details->mtime != mtime ||
-	    file->details->ctime != ctime) {
+	    file->details->ctime != ctime ||
+        file->details->btime != btime) {
 		if (file->details->thumbnail == NULL) {
 			file->details->thumbnail_is_up_to_date = FALSE;
 		}
@@ -2562,6 +2564,7 @@ update_info_internal (NemoFile *file,
 	file->details->atime = atime;
 	file->details->ctime = ctime;
 	file->details->mtime = mtime;
+    file->details->btime = btime;
 
 	if (file->details->thumbnail != NULL &&
 	    file->details->thumbnail_mtime != 0 &&
@@ -8270,12 +8273,6 @@ invalidate_file_info (NemoFile *file)
 }
 
 static void
-invalidate_btime (NemoFile *file)
-{
-    file->details->btime_is_up_to_date = FALSE;
-}
-
-static void
 invalidate_link_info (NemoFile *file)
 {
 	file->details->link_info_is_up_to_date = FALSE;
@@ -8354,9 +8351,6 @@ nemo_file_invalidate_attributes_internal (NemoFile *file,
 	if (REQUEST_WANTS_TYPE (request, REQUEST_FILE_INFO)) {
 		invalidate_file_info (file);
 	}
-    if (REQUEST_WANTS_TYPE (request, REQUEST_BTIME)) {
-        invalidate_btime (file);
-    }
 	if (REQUEST_WANTS_TYPE (request, REQUEST_LINK_INFO)) {
 		invalidate_link_info (file);
 	}
@@ -8448,7 +8442,6 @@ nemo_file_get_all_attributes (void)
 		NEMO_FILE_ATTRIBUTE_EXTENSION_INFO |
 		NEMO_FILE_ATTRIBUTE_THUMBNAIL |
 		NEMO_FILE_ATTRIBUTE_MOUNT |
-        NEMO_FILE_ATTRIBUTE_BTIME |
         NEMO_FILE_ATTRIBUTE_FAVORITE_CHECK;
 }
 

@@ -1213,30 +1213,20 @@ find_token_type (const gchar *str, TokenType *token_type)
 static gchar *
 get_path (NemoAction *action, NemoFile *file)
 {
-    gchar *ret, *escaped, *orig;
+    gchar *ret, *orig;
 
     orig = nemo_file_get_path (file);
 
     if (action->quote_type == QUOTE_TYPE_DOUBLE) {
-        escaped = eel_str_escape_double_quoted_content (orig);
+        ret = eel_str_escape_double_quoted_content (orig);
     } else if (action->quote_type == QUOTE_TYPE_SINGLE) {
         // Replace literal ' with a close ', a \', and an open '
-        escaped = eel_str_replace_substring (orig, "'", "'\\''");
+        ret = eel_str_replace_substring (orig, "'", "'\\''");
     } else {
-        escaped = eel_str_escape_non_space_special_characters (orig);
-    }
-
-    if (action->escape_space) {
-        ret = eel_str_escape_spaces (escaped);
-    } else {
-        ret = escaped;
+        ret = eel_str_escape_shell_characters (orig);
     }
 
     g_free (orig);
-
-    if (ret != escaped) {
-        g_free (escaped);
-    }
 
     return ret;
 }
@@ -1295,15 +1285,20 @@ get_device_path (NemoAction *action, NemoFile *file)
     g_return_val_if_fail (mount != NULL, NULL);
 
     GVolume *volume = g_mount_get_volume (mount);
-    gchar *ret = NULL;
+    gchar *ret, *id;
 
-    if (action->escape_space) {
-        gchar *id = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE);
-        ret = eel_str_escape_spaces (id);
-        g_free (id);
+    id = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE);
+
+    if (action->quote_type == QUOTE_TYPE_DOUBLE) {
+        ret = eel_str_escape_double_quoted_content (id);
+    } else if (action->quote_type == QUOTE_TYPE_SINGLE) {
+        // Replace literal ' with a close ', a \', and an open '
+        ret = eel_str_replace_substring (id, "'", "'\\''");
     } else {
-        ret = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE);
+        ret = eel_str_escape_shell_characters (id);
     }
+
+    g_free (id);
 
     g_object_unref (mount);
     g_object_unref (volume);
