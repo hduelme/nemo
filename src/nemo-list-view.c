@@ -38,6 +38,7 @@
 #include <string.h>
 #include <eel/eel-vfs-extensions.h>
 #include <eel/eel-gdk-extensions.h>
+#include <eel/eel-gtk-extensions.h>
 #include <eel/eel-glib-extensions.h>
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
@@ -124,6 +125,8 @@ struct NemoListViewDetails {
 
     GList *current_selection;
     gint current_selection_count;
+
+    gboolean overlay_scrolling;
 };
 
 struct SelectionForeachData {
@@ -597,6 +600,14 @@ drag_begin_callback (GtkWidget *widget,
 				(GDestroyNotify)ref_list_free);
 }
 
+static void
+drag_end_callback (GtkWidget *widget,
+             GdkDragContext *context,
+             NemoListView *view)
+{
+    view->details->drag_started = FALSE;
+}
+
 static gboolean
 motion_notify_callback (GtkWidget *widget,
 			GdkEventMotion *event,
@@ -943,10 +954,10 @@ clicked_within_slow_click_interval_on_text (NemoListView *view, GtkTreePath *pat
                   "gtk-double-click-time", &double_click_interval,
                   NULL);
 
-    /* slow click interval is always 2 seconds longer than the system
+    /* slow click interval is always 800ms longer than the system
      * double-click interval. */
 
-    interval = double_click_interval + 2000;
+    interval = double_click_interval + 800;
 
     current_time = g_get_monotonic_time ();
     if (current_time - last_slow_click_time < interval * 1000) {
@@ -1605,9 +1616,12 @@ sort_column_changed_callback (GtkTreeSortable *sortable,
         if (nemo_global_preferences_get_ignore_view_metadata ())
                 nemo_window_set_ignore_meta_sort_column (nemo_view_get_nemo_window (NEMO_VIEW (view)),
                                                          g_quark_to_string (sort_attr));
-        else
-                nemo_file_set_metadata (file, NEMO_METADATA_KEY_LIST_VIEW_SORT_COLUMN,
-                                        g_quark_to_string (default_sort_attr), g_quark_to_string (sort_attr));
+        else if (nemo_file_is_in_search (file)) {
+            g_settings_set_string (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_SORT_COLUMN, g_quark_to_string (sort_attr));
+        } else {
+            nemo_file_set_metadata (file, NEMO_METADATA_KEY_LIST_VIEW_SORT_COLUMN,
+                                    g_quark_to_string (default_sort_attr), g_quark_to_string (sort_attr));
+        }
 
 	default_reversed_attr = (default_sort_reversed ? (char *)"true" : (char *)"false");
 
@@ -1636,6 +1650,8 @@ sort_column_changed_callback (GtkTreeSortable *sortable,
     if (nemo_global_preferences_get_ignore_view_metadata ()) {
         nemo_window_set_ignore_meta_sort_direction (nemo_view_get_nemo_window (NEMO_VIEW (view)),
                                                     reversed ? SORT_DESCENDING : SORT_ASCENDING);
+    } else if (nemo_file_is_in_search (file)) {
+        g_settings_set_boolean (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_REVERSE_SORT, reversed);
     } else {
         reversed_attr = (reversed ? (char *)"true" : (char *)"false");
         nemo_file_set_metadata (file, NEMO_METADATA_KEY_LIST_VIEW_SORT_REVERSED,
@@ -1761,16 +1777,43 @@ get_root_uri_callback (NemoTreeViewDragDest *dest,
 	return nemo_view_get_uri (NEMO_VIEW (view));
 }
 
+// this is confusing... so rename them.
+#define ALLOW_EXPAND FALSE
+#define PREVENT_EXPAND TRUE
+
+static gboolean
+test_expand_row_callback (GtkTreeView *treeview,
+                          GtkTreeIter *iter,
+                          GtkTreePath *path,
+                          gpointer     user_data)
+{
+    NemoListView *view = NEMO_LIST_VIEW (user_data);
+
+    if (!view->details->drag_started) {
+        return ALLOW_EXPAND;
+    }
+
+    if (eel_gtk_get_treeview_row_text_is_under_pointer (view->details->tree_view)) {
+        return ALLOW_EXPAND;
+    }
+
+    return PREVENT_EXPAND;
+}
+
 static NemoFile *
 get_file_for_path_callback (NemoTreeViewDragDest *dest,
 			    GtkTreePath *path,
 			    gpointer user_data)
 {
-	NemoListView *view;
+    NemoListView *view;
 
-	view = NEMO_LIST_VIEW (user_data);
+    view = NEMO_LIST_VIEW (user_data);
 
-	return nemo_list_model_file_for_path (view->details->model, path);
+    if (!eel_gtk_get_treeview_row_text_is_under_pointer (view->details->tree_view)) {
+        return NULL;
+    }
+
+    return nemo_list_model_file_for_path (view->details->model, path);
 }
 
 /* Handles an URL received from Mozilla */
@@ -2321,7 +2364,36 @@ static void
 handle_vadjustment_changed (GtkAdjustment *adjustment,
                             NemoListView  *view)
 {
+    gboolean reallocate = FALSE;
+
+    if (view->details->overlay_scrolling) {
+        gint upper, current_adjust, page_size, current_margin;
+
+        page_size = gtk_adjustment_get_page_size (adjustment);
+        upper = gtk_adjustment_get_upper (adjustment);
+        current_adjust = gtk_adjustment_get_value (adjustment);
+        current_margin = gtk_widget_get_margin_bottom (GTK_WIDGET (view->details->tree_view));
+
+        if (upper == current_adjust + page_size) {
+            GtkWidget *hscrollbar = gtk_scrolled_window_get_hscrollbar (GTK_SCROLLED_WINDOW (view));
+            gint nat_height;
+
+            gtk_widget_get_preferred_height (hscrollbar, NULL, &nat_height);
+            gtk_widget_set_margin_bottom (GTK_WIDGET (view->details->tree_view), nat_height * 2);
+            if (current_margin != nat_height)
+                reallocate = TRUE;
+        } else {
+            gtk_widget_set_margin_bottom (GTK_WIDGET (view->details->tree_view), 0);
+
+            if (current_margin > 0)
+                reallocate = TRUE;
+        }
+    }
+
     queue_update_visible_icons (view, NORMAL_UPDATE_VISIBLE_DELAY);
+
+    if (reallocate)
+        gtk_widget_queue_allocate (GTK_WIDGET (view->details->tree_view));
 }
 
 static gint
@@ -2349,28 +2421,40 @@ static void
 update_date_fonts (NemoListView *view)
 {
     g_return_if_fail (NEMO_IS_LIST_VIEW (view));
-
-    PangoFontDescription *font_desc;
-    PangoStyle style;
+    NemoDateFontChoice mono_pref;
     gchar *font_name;
-    const gchar *new_family;
+    PangoStyle date_style;
+    gchar *date_name = NULL;
+    gchar *date_family = NULL;
 
     GtkSettings *settings = gtk_settings_get_default ();
     g_object_get (settings, "gtk-font-name", &font_name, NULL);
 
-    font_desc = pango_font_description_from_string (font_name);
+    mono_pref = g_settings_get_enum (nemo_preferences, NEMO_PREFERENCES_DATE_FONT_CHOICE);
 
     if (g_settings_get_enum (nemo_preferences, NEMO_PREFERENCES_DATE_FORMAT) == NEMO_DATE_FORMAT_INFORMAL ||
-        !g_settings_get_boolean (nemo_preferences, NEMO_PREFERENCES_DATE_FORMAT_MONOSPACE) ||
+        mono_pref == NEMO_DATE_FONT_CHOICE_NONE ||
         g_strstr_len (font_name, -1, "Mono")) {
-        new_family = pango_font_description_get_family (font_desc);
+        date_name = g_strdup (font_name);
     } else {
-        const gchar *current_font_family;
-        current_font_family = pango_font_description_get_family (font_desc);
-        new_family = nemo_global_preferences_get_mono_font_family_match (current_font_family);
-    }
+        if (mono_pref == NEMO_DATE_FONT_CHOICE_AUTO) {
+            PangoFontDescription *font_desc = pango_font_description_from_string (font_name);
+            const gchar *current_font_family = pango_font_description_get_family (font_desc);
 
-    style = pango_font_description_get_style (font_desc);
+            if (current_font_family != NULL) {
+                date_family = nemo_global_preferences_get_mono_font_family_match (current_font_family);
+            } else {
+                g_warning ("No font family name set, not using monospace for date columns");
+                date_family = NULL;
+            }
+
+            date_style = pango_font_description_get_style (font_desc);
+
+            pango_font_description_free (font_desc);
+        } else {
+            date_name = nemo_global_preferences_get_mono_system_font ();
+        }
+    }
 
     GList *combined = g_list_copy (view->details->cells);
     combined = g_list_prepend (combined, view->details->file_name_cell);
@@ -2381,10 +2465,16 @@ update_date_fonts (NemoListView *view)
         const gchar *column_id = g_object_get_data (G_OBJECT (cell), "column-id");
 
         if (g_str_has_prefix (column_id, "date_")) {
-            g_object_set (GTK_CELL_RENDERER_TEXT (cell),
-                          "family", new_family,
-                          "style", style,
-                          NULL);
+            if (date_family) {
+                g_object_set (GTK_CELL_RENDERER_TEXT (cell),
+                              "family", date_family,
+                              "style", date_style,
+                              NULL);
+            } else {
+                g_object_set (GTK_CELL_RENDERER_TEXT (cell),
+                              "font", date_name,
+                              NULL);
+            }
         }
         else {
             g_object_set (GTK_CELL_RENDERER_TEXT (cell),
@@ -2395,10 +2485,10 @@ update_date_fonts (NemoListView *view)
 
     gtk_widget_queue_draw (GTK_WIDGET (view->details->tree_view));
 
-    pango_font_description_free (font_desc);
     g_list_free (combined);
     g_free (font_name);
-
+    g_free (date_family);
+    g_free (date_name);
 }
 
 static void
@@ -2428,7 +2518,7 @@ create_and_set_up_tree_view (NemoListView *view)
 	gtk_binding_entry_remove (binding_set, GDK_KEY_BackSpace, 0);
 
 	view->details->drag_dest =
-		nemo_tree_view_drag_dest_new (view->details->tree_view);
+		nemo_tree_view_drag_dest_new (view->details->tree_view, TRUE);
 
 	g_signal_connect_object (view->details->drag_dest,
 				 "get_root_uri",
@@ -2458,8 +2548,10 @@ create_and_set_up_tree_view (NemoListView *view)
     g_signal_connect_object (GTK_WIDGET (view->details->tree_view), "query-tooltip",
                              G_CALLBACK (query_tooltip_callback), view, 0);
 
-	g_signal_connect_object (view->details->tree_view, "drag_begin",
-				 G_CALLBACK (drag_begin_callback), view, 0);
+    g_signal_connect_object (view->details->tree_view, "drag_begin",
+                 G_CALLBACK (drag_begin_callback), view, 0);
+    g_signal_connect_object (view->details->tree_view, "drag-end",
+                 G_CALLBACK (drag_end_callback), view, 0);
 	g_signal_connect_object (view->details->tree_view, "drag_data_get",
 				 G_CALLBACK (drag_data_get_callback), view, 0);
 	g_signal_connect_object (view->details->tree_view, "motion_notify_event",
@@ -2482,6 +2574,8 @@ create_and_set_up_tree_view (NemoListView *view)
                                  G_CALLBACK (row_collapsed_callback), view, 0);
 	g_signal_connect_object (view->details->tree_view, "row-activated",
                                  G_CALLBACK (row_activated_callback), view, 0);
+    g_signal_connect_object (view->details->tree_view, "test-expand-row",
+                                 G_CALLBACK (test_expand_row_callback), view, 0);
 
     	g_signal_connect_object (view->details->tree_view, "focus_in_event",
 				 G_CALLBACK(focus_in_event_callback), view, 0);
@@ -2641,7 +2735,8 @@ create_and_set_up_tree_view (NemoListView *view)
     update_date_fonts (view);
     GtkSettings *gtk_settings = gtk_settings_get_default ();
     g_signal_connect_swapped (gtk_settings, "notify::gtk-font-name", G_CALLBACK (update_date_fonts), view);
-    g_signal_connect_swapped (nemo_preferences, "changed::" NEMO_PREFERENCES_DATE_FORMAT_MONOSPACE, G_CALLBACK (update_date_fonts), view);
+    g_signal_connect_swapped (nemo_preferences, "changed::" NEMO_PREFERENCES_DATE_FONT_CHOICE, G_CALLBACK (update_date_fonts), view);
+    g_signal_connect_swapped (gnome_interface_preferences, "changed::" NEMO_PREFERENCES_MONO_FONT_NAME, G_CALLBACK (update_date_fonts), view);
 	nemo_column_list_free (nemo_columns);
 
 	default_visible_columns = g_settings_get_strv (nemo_list_view_preferences,
@@ -2848,10 +2943,13 @@ set_sort_order_from_metadata_and_preferences (NemoListView *list_view)
 
         if (nemo_global_preferences_get_ignore_view_metadata ())
                 sort_attribute = g_strdup (nemo_window_get_ignore_meta_sort_column (nemo_view_get_nemo_window (NEMO_VIEW (list_view))));
-        else
-                sort_attribute = nemo_file_get_metadata (file,
-                                                         NEMO_METADATA_KEY_LIST_VIEW_SORT_COLUMN,
-                                                         NULL);
+        else if (nemo_file_is_in_search (file)) {
+            sort_attribute = g_settings_get_string (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_SORT_COLUMN);
+        } else {
+            sort_attribute = nemo_file_get_metadata (file,
+                                                     NEMO_METADATA_KEY_LIST_VIEW_SORT_COLUMN,
+                                                     NULL);
+        }
 	sort_column_id = nemo_list_model_get_sort_column_id_from_attribute (list_view->details->model,
 									  g_quark_from_string (sort_attribute));
 	g_free (sort_attribute);
@@ -2867,6 +2965,8 @@ set_sort_order_from_metadata_and_preferences (NemoListView *list_view)
     if (nemo_global_preferences_get_ignore_view_metadata ()) {
         gint dir = nemo_window_get_ignore_meta_sort_direction (nemo_view_get_nemo_window (NEMO_VIEW (list_view)));
         sort_reversed = dir > SORT_NULL ? dir == SORT_DESCENDING : default_sort_reversed;
+    } else if (nemo_file_is_in_search (file)) {
+        sort_reversed = g_settings_get_boolean (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_REVERSE_SORT);
     } else {
         sort_reversed = nemo_file_get_boolean_metadata (file,
                                                         NEMO_METADATA_KEY_LIST_VIEW_SORT_REVERSED,
@@ -2948,6 +3048,8 @@ nemo_list_view_begin_loading (NemoView *view)
 	set_sort_order_from_metadata_and_preferences (list_view);
 	set_zoom_level_from_metadata_and_preferences (list_view);
 	set_columns_settings_from_metadata_and_preferences (list_view);
+
+    gtk_widget_set_margin_bottom (GTK_WIDGET (list_view->details->tree_view), 0);
 
     set_ok_to_load_deferred_attrs (list_view, FALSE);
 
@@ -3576,6 +3678,10 @@ nemo_list_view_reset_to_defaults (NemoView *view)
         nemo_window_set_ignore_meta_zoom_level (window, NEMO_ZOOM_LEVEL_NULL);
         nemo_window_set_ignore_meta_column_order (window, NULL);
         nemo_window_set_ignore_meta_visible_columns (window, NULL);
+    } else if (nemo_file_is_in_search (file)) {
+        g_settings_reset (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_VISIBLE_COLUMNS);
+        g_settings_reset (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_SORT_COLUMN);
+        g_settings_reset (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_REVERSE_SORT);
     } else {
         nemo_file_set_metadata (file, NEMO_METADATA_KEY_LIST_VIEW_SORT_COLUMN, NULL, NULL);
         nemo_file_set_metadata (file, NEMO_METADATA_KEY_LIST_VIEW_SORT_REVERSED, NULL, NULL);
@@ -3584,9 +3690,6 @@ nemo_list_view_reset_to_defaults (NemoView *view)
         nemo_file_set_metadata_list (file, NEMO_METADATA_KEY_LIST_VIEW_VISIBLE_COLUMNS, NULL);
     }
 
-    if (nemo_file_is_in_search (file)) {
-        g_settings_reset (nemo_search_preferences, NEMO_PREFERENCES_SEARCH_VISIBLE_COLUMNS);
-    }
 
     char **default_columns, **default_order;
 
@@ -4238,6 +4341,9 @@ nemo_list_view_init (NemoListView *list_view)
 {
 	list_view->details = g_new0 (NemoListViewDetails, 1);
 
+    GtkStyleContext *context = gtk_widget_get_style_context (GTK_WIDGET (list_view));
+    gtk_style_context_add_class (context, "view");
+
 	create_and_set_up_tree_view (list_view);
 
 	g_signal_connect_swapped (nemo_preferences,
@@ -4304,6 +4410,11 @@ nemo_list_view_init (NemoListView *list_view)
 		g_signal_connect (nemo_clipboard_monitor_get (),
 		                  "clipboard_info",
 		                  G_CALLBACK (list_view_notify_clipboard_info), list_view);
+
+    GtkSettings *gtksettings = gtk_settings_get_default ();
+    g_object_get (gtksettings,
+                  "gtk-overlay-scrolling", &list_view->details->overlay_scrolling,
+                  NULL);
 }
 
 static NemoView *

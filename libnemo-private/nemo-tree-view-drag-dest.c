@@ -38,6 +38,7 @@
 #include "nemo-link.h"
 
 #include <gtk/gtk.h>
+#include <eel/eel-gtk-extensions.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -67,6 +68,7 @@ struct _NemoTreeViewDragDestDetails {
     gboolean desktop_dnd_can_delete_source;
 
 	char *direct_save_uri;
+    gboolean strict_drop;
 };
 
 enum {
@@ -157,8 +159,9 @@ expand_timeout (gpointer data)
 {
 	GtkTreeView *tree_view;
 	GtkTreePath *drop_path;
+    NemoTreeViewDragDest *dest = NEMO_TREE_VIEW_DRAG_DEST (data);
 
-	tree_view = GTK_TREE_VIEW (data);
+	tree_view = GTK_TREE_VIEW (dest->details->tree_view);
 
 	gtk_tree_view_get_drag_dest_row (tree_view, &drop_path, NULL);
 
@@ -167,6 +170,7 @@ expand_timeout (gpointer data)
 		gtk_tree_path_free (drop_path);
 	}
 
+    dest->details->expand_id = 0;
 	return FALSE;
 }
 
@@ -504,7 +508,15 @@ drag_motion_callback (GtkWidget *widget,
 					 NULL);
 
 	if (action) {
-		set_drag_dest_row (dest, drop_path);
+        if (dest->details->strict_drop) {
+            if (eel_gtk_get_treeview_row_text_is_under_pointer (GTK_TREE_VIEW (widget))) {
+                set_drag_dest_row (dest, drop_path);
+            } else {
+                clear_drag_dest_row (dest);
+            }
+        } else {
+            set_drag_dest_row (dest, drop_path);
+        }
 		model = gtk_tree_view_get_model (GTK_TREE_VIEW (widget));
 		if (drop_path == NULL || (old_drop_path != NULL &&
 		    gtk_tree_path_compare (old_drop_path, drop_path) != 0)) {
@@ -515,7 +527,7 @@ drag_motion_callback (GtkWidget *widget,
 			if (gtk_tree_model_iter_has_child (model, &drop_iter)) {
 				dest->details->expand_id = g_timeout_add_seconds (HOVER_EXPAND_TIMEOUT,
 									  expand_timeout,
-									  dest->details->tree_view);
+									  dest);
 			}
 		}
 	} else {
@@ -1152,7 +1164,7 @@ nemo_tree_view_drag_dest_class_init (NemoTreeViewDragDestClass *class)
 
 
 NemoTreeViewDragDest *
-nemo_tree_view_drag_dest_new (GtkTreeView *tree_view)
+nemo_tree_view_drag_dest_new (GtkTreeView *tree_view, gboolean strict_drop)
 {
 	NemoTreeViewDragDest *dest;
 	GtkTargetList *targets;
@@ -1162,6 +1174,7 @@ nemo_tree_view_drag_dest_new (GtkTreeView *tree_view)
 	dest->details->tree_view = tree_view;
     dest->details->desktop_dnd_source_fs = NULL;
     dest->details->desktop_dnd_can_delete_source = FALSE;
+    dest->details->strict_drop = strict_drop;
 	g_object_weak_ref (G_OBJECT (dest->details->tree_view),
 			   tree_view_weak_notify, dest);
 

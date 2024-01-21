@@ -1,8 +1,8 @@
 # Meson build file
 
 # https://github.com/linuxmint/nemo
-project('nemo', 'c', version: '5.6.0',
-  meson_version: '>=0.41.0'
+project('nemo', 'c', version: '6.0.2',
+  meson_version: '>=0.56.0'
 )
 
 # 1. If the library code has changed at all since last release, then increment revision.
@@ -29,7 +29,6 @@ buildtype = get_option('buildtype')
 
 # Surround the version in quotes to make it a C string
 conf.set_quoted('VERSION', meson.project_version())
-conf.set('ENABLE_DEBUG', buildtype == 'debug')
 
 check_headers = [
   'malloc.h',
@@ -57,9 +56,12 @@ if not get_option('deprecated_warnings')
   )
 endif
 
-if get_option('profiling')
-    add_global_arguments('-fno-omit-frame-pointer',
-        language: 'c')
+if buildtype in ['debug', 'debugoptimized']
+    conf.set('ENABLE_DEBUG', true)
+endif
+
+if buildtype == 'debug'
+    add_global_arguments('-fno-omit-frame-pointer', language: 'c')
 endif
 
 ################################################################################
@@ -70,6 +72,7 @@ glib_version = '>=2.45.7'
 math    = cc.find_library('m', required: true)
 
 gtk     = dependency('gtk+-3.0',                    version: '>=3.10.0')
+gtk_wl  = dependency('gtk+-wayland-3.0',            version: '>=3.10.0')
 gio     = dependency('gio-2.0',                     version: glib_version)
 gio_unix= dependency('gio-unix-2.0',                version: glib_version)
 glib    = dependency('glib-2.0',                    version: glib_version)
@@ -90,7 +93,10 @@ tracker_enabled = false
 if trackerChoice != 'false'
   trackerRequired = (trackerChoice == 'true')
   # Check all the possible versions
+    tracker_sparql = dependency('tracker-sparql-3.0',  required: false)
+  if not tracker_sparql.found()
     tracker_sparql = dependency('tracker-sparql-2.0',  required: false)
+  endif
   if not tracker_sparql.found()
     tracker_sparql = dependency('tracker-sparql-1.0',  required: false)
   endif
@@ -170,7 +176,7 @@ nemo_definitions =  [
   '-DLIBEXECDIR="@0@"'.format(libExecPath),
 ]
 
-po_subdir = join_paths(meson.source_root(), 'po')
+po_subdir = join_paths(meson.project_source_root(), 'po')
 
 subdir('install-scripts')
 subdir('cut-n-paste-code/libegg')
@@ -190,9 +196,8 @@ message('\n'.join(['',
 '        @0@-@1@'.format(meson.project_name(), meson.project_version()),
 '',
 '    prefix:                 @0@'.format(prefix),
-'    source code location:   @0@'.format(meson.source_root()),
+'    source code location:   @0@'.format(meson.project_source_root()),
 '    compiler:               @0@'.format(cc.get_id()),
-'    debugging support:      @0@'.format(buildtype),
 '    libexif support:        @0@'.format(libexif_enabled),
 '    exempi  support:        @0@'.format(exempi_enabled),
 '    Tracker support:        @0@'.format(tracker_enabled),
@@ -200,6 +205,7 @@ message('\n'.join(['',
 '    nemo-extension documentation: @0@'.format(gtkdoc_enabled),
 '    nemo-extension introspection: @0@'.format(true),
 '',
-'    perf profiling support: @0@'.format(get_option('profiling')),
+'    debugging support:      @0@'.format(buildtype),
+'    perf profiling support: @0@'.format(buildtype == 'debug'),
 '',
 ]))

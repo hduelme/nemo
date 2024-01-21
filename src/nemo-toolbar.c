@@ -76,12 +76,24 @@ enum {
 
 static GParamSpec *properties[NUM_PROPERTIES] = { NULL, };
 
+enum {
+    CHECK_ADMIN_LOCATION,
+    LAST_SIGNAL
+};
+
+static guint signals[LAST_SIGNAL] = { 0 };
+
 G_DEFINE_TYPE (NemoToolbar, nemo_toolbar, GTK_TYPE_BOX);
 
 static void
 nemo_toolbar_update_root_state (NemoToolbar *self)
 {
-    if ((nemo_user_is_root () && !nemo_treating_root_as_normal()) &&
+    gboolean is_admin_uri;
+
+    g_signal_emit (self, signals[CHECK_ADMIN_LOCATION], 0, &is_admin_uri);
+
+    if ((is_admin_uri ||
+         (nemo_user_is_root () && !nemo_treating_root_as_normal())) &&
          g_settings_get_boolean (nemo_preferences, NEMO_PREFERENCES_SHOW_ROOT_WARNING)) {
         if (self->priv->show_root_bar != TRUE) {
             self->priv->show_root_bar = TRUE;
@@ -163,8 +175,7 @@ toolbar_update_appearance (NemoToolbar *self)
 
     widgetitem = self->priv->toggle_location_button;
     icon_toolbar = g_settings_get_boolean (nemo_preferences, NEMO_PREFERENCES_SHOW_EDIT_ICON_TOOLBAR);
-    gboolean entry_preferred = g_settings_get_boolean (nemo_preferences,  NEMO_PREFERENCES_SHOW_LOCATION_ENTRY);
-    if (!icon_toolbar || entry_preferred) { gtk_widget_hide (widgetitem); }
+    if ( icon_toolbar == FALSE ) { gtk_widget_hide (widgetitem); }
     else {gtk_widget_show (GTK_WIDGET(widgetitem));}
 
     widgetitem = self->priv->icon_view_button;
@@ -497,6 +508,13 @@ nemo_toolbar_class_init (NemoToolbarClass *klass)
 				      TRUE,
 				      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 	
+    signals[CHECK_ADMIN_LOCATION] =
+        g_signal_new ("check-admin-location",
+                      G_TYPE_FROM_CLASS (klass),
+                      G_SIGNAL_RUN_LAST,
+                      0, NULL, NULL, NULL,
+                      G_TYPE_BOOLEAN, 0);
+
 	g_type_class_add_private (klass, sizeof (NemoToolbarClass));
 	g_object_class_install_properties (oclass, NUM_PROPERTIES, properties);
 }
@@ -550,4 +568,10 @@ nemo_toolbar_set_show_location_entry (NemoToolbar *self,
 
 		g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_SHOW_LOCATION_ENTRY]);
 	}
+}
+
+void
+nemo_toolbar_update_for_location (NemoToolbar *self)
+{
+    toolbar_update_appearance (self);
 }

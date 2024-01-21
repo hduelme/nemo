@@ -927,7 +927,7 @@ toggle_location_entry (NemoWindow     *window,
                        NemoWindowPane *pane,
                        gboolean        from_accel_or_menu)
 {
-    gboolean current_view, temp_toolbar_visible, default_toolbar_visible, grab_focus_only, already_has_focus, entry_preferred;
+    gboolean current_view, temp_toolbar_visible, default_toolbar_visible, grab_focus_only, already_has_focus;
     GtkToggleAction *button_action;
     GtkActionGroup *action_group;
 
@@ -936,9 +936,8 @@ toggle_location_entry (NemoWindow     *window,
     default_toolbar_visible = g_settings_get_boolean (nemo_window_state,
                                                       NEMO_WINDOW_STATE_START_WITH_TOOLBAR);
     already_has_focus = nemo_location_bar_has_focus (NEMO_LOCATION_BAR (pane->location_bar));
-    entry_preferred = g_settings_get_boolean (nemo_preferences, NEMO_PREFERENCES_SHOW_LOCATION_ENTRY);
 
-    grab_focus_only = from_accel_or_menu && (pane->last_focus_widget == NULL || !already_has_focus || entry_preferred) && current_view;
+    grab_focus_only = from_accel_or_menu && (pane->last_focus_widget == NULL || !already_has_focus) && current_view;
 
     if ((temp_toolbar_visible || default_toolbar_visible) && !grab_focus_only) {
         nemo_toolbar_set_show_location_entry (NEMO_TOOLBAR (pane->tool_bar), !current_view);
@@ -1025,7 +1024,6 @@ action_icon_view_callback (GtkAction *action,
     window = NEMO_WINDOW (user_data);
 
     set_content_view_type (window, NEMO_ICON_VIEW_ID);
-    toolbar_set_view_button (ICON_VIEW, nemo_window_get_active_pane(window));
 }
 
 
@@ -1038,7 +1036,6 @@ action_list_view_callback (GtkAction *action,
     window = NEMO_WINDOW (user_data);
 
     set_content_view_type (window, NEMO_LIST_VIEW_ID);
-    toolbar_set_view_button (LIST_VIEW, nemo_window_get_active_pane(window));
 }
 
 
@@ -1051,7 +1048,6 @@ action_compact_view_callback (GtkAction *action,
     window = NEMO_WINDOW (user_data);
 
     set_content_view_type (window, FM_COMPACT_VIEW_ID);
-    toolbar_set_view_button (COMPACT_VIEW, nemo_window_get_active_pane(window));
 }
 
 guint
@@ -1069,15 +1065,14 @@ action_for_view_id (const char *view_id)
 }
 
 void
-toolbar_set_view_button (guint action_id, NemoWindowPane *pane)
+toolbar_set_view_button (guint action_id, NemoWindow *window)
 {
     GtkAction *action, *action1, *action2;
     GtkActionGroup *action_group;
     if (action_id == NULL_VIEW) {
         return;
     }
-    action_group = nemo_window_pane_get_toolbar_action_group (pane);
-
+    action_group = nemo_window_pane_get_toolbar_action_group (nemo_window_get_active_pane (window));
 
     action = gtk_action_group_get_action(action_group,
                                          NEMO_ACTION_ICON_VIEW);
@@ -1091,20 +1086,20 @@ toolbar_set_view_button (guint action_id, NemoWindowPane *pane)
                          0, 0,
                          NULL,
                          action_icon_view_callback,
-                         NULL);
+                         window);
 
     g_signal_handlers_block_matched (action1,
                          G_SIGNAL_MATCH_FUNC,
                          0, 0,
                          NULL,
                          action_list_view_callback,
-                         NULL);
+                         window);
     g_signal_handlers_block_matched (action2,
                          G_SIGNAL_MATCH_FUNC,
                          0, 0,
                          NULL,
                          action_compact_view_callback,
-                         NULL);
+                         window);
 
     if (action_id != ICON_VIEW) {
         gtk_toggle_action_set_active(GTK_TOGGLE_ACTION(action), FALSE);
@@ -1129,7 +1124,7 @@ toolbar_set_view_button (guint action_id, NemoWindowPane *pane)
                            0, 0,
                            NULL,
                            action_icon_view_callback,
-                           NULL);
+                           window);
 
 
     g_signal_handlers_unblock_matched (action1,
@@ -1137,7 +1132,7 @@ toolbar_set_view_button (guint action_id, NemoWindowPane *pane)
                            0, 0,
                            NULL,
                            action_list_view_callback,
-                           NULL);
+                           window);
 
 
     g_signal_handlers_unblock_matched (action2,
@@ -1145,7 +1140,7 @@ toolbar_set_view_button (guint action_id, NemoWindowPane *pane)
                            0, 0,
                            NULL,
                            action_compact_view_callback,
-                           NULL);
+                           window);
 
 }
 
@@ -1352,26 +1347,22 @@ action_open_terminal_callback(GtkAction *action, gpointer callback_data)
     g_object_unref (gfile);
 }
 
+#define NEMO_VIEW_MENUBAR_FILE_PATH                  "/MenuBar/File"
+
 static void
-file_menu_bar_item_activated (GtkAction *action, gpointer user_data)
+on_file_menu_show (GtkWidget *widget, gpointer user_data)
 {
     NemoWindow *window;
     NemoView *view;
 
     window = NEMO_WINDOW (user_data);
-
-    if (window->details->dynamic_menu_entries_current) {
-        return;
-    }
-
     view = get_current_view (window);
-    nemo_view_update_actions_and_extensions (view);
 
-    window->details->dynamic_menu_entries_current = TRUE;
+    nemo_view_update_actions_and_extensions (view);
 }
 
 static const GtkActionEntry main_entries[] = {
-  /* name, stock id, label */  { "File", NULL, N_("_File"), NULL, NULL, G_CALLBACK (file_menu_bar_item_activated) },
+  /* name, stock id, label */  { "File", NULL, N_("_File") },
   /* name, stock id, label */  { "Edit", NULL, N_("_Edit") },
   /* name, stock id, label */  { "View", NULL, N_("_View") },
   /* name, stock id, label */  { "Help", NULL, N_("_Help") },
@@ -1870,16 +1861,6 @@ nemo_window_initialize_actions (NemoWindow *window)
 			  NULL);
 }
 
-static void
-menu_bar_deactivated (GtkMenuShell *menu, gpointer user_data)
-{
-    NemoWindow *window;
-
-    window = NEMO_WINDOW (user_data);
-
-    window->details->dynamic_menu_entries_current = FALSE;
-}
-
 /**
  * nemo_window_initialize_menus
  *
@@ -1891,7 +1872,6 @@ nemo_window_initialize_menus (NemoWindow *window)
 {
 	GtkActionGroup *action_group;
 	GtkUIManager *ui_manager;
-    GtkWidget *menubar;
 	GtkAction *action;
       GtkAction *action_to_hide;
 	gint i;
@@ -2003,13 +1983,10 @@ nemo_window_initialize_menus (NemoWindow *window)
 	/* add the UI */
 	gtk_ui_manager_add_ui_from_resource (ui_manager, "/org/nemo/nemo-shell-ui.xml", NULL);
 
-    // window->details->menubar isn't set yet
-    menubar = gtk_ui_manager_get_widget (window->details->ui_manager, "/MenuBar");
-
-    g_signal_connect (menubar,
-                      "deactivate",
-                      G_CALLBACK (menu_bar_deactivated),
-                      window);
+    GtkWidget *menuitem, *submenu;
+    menuitem = gtk_ui_manager_get_widget (nemo_window_get_ui_manager (window), NEMO_VIEW_MENUBAR_FILE_PATH);
+    submenu = gtk_menu_item_get_submenu (GTK_MENU_ITEM (menuitem));
+    g_signal_connect (submenu, "show", G_CALLBACK (on_file_menu_show), window);
 
 	nemo_window_initialize_trash_icon_monitor (window);
 }

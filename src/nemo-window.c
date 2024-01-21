@@ -956,9 +956,15 @@ nemo_window_save_geometry (NemoWindow *window)
 	g_assert (NEMO_IS_WINDOW (window));
 
 	if (gtk_widget_get_window (GTK_WIDGET (window)) && !nemo_window_is_desktop (window)) {
-		geometry_string = eel_gtk_window_get_geometry_string (GTK_WINDOW (window));
-		is_maximized = gdk_window_get_state (gtk_widget_get_window (GTK_WIDGET (window)))
-				& GDK_WINDOW_STATE_MAXIMIZED;
+        GdkWindowState state = gdk_window_get_state (gtk_widget_get_window (GTK_WIDGET (window)));
+
+        if (state & GDK_WINDOW_STATE_TILED) {
+            return;
+        }
+
+        geometry_string = eel_gtk_window_get_geometry_string (GTK_WINDOW (window));
+
+		is_maximized = state & GDK_WINDOW_STATE_MAXIMIZED;
 
 		if (!is_maximized) {
 			g_settings_set_string
@@ -1311,17 +1317,15 @@ sync_view_type_callback (NemoFile *file,
     window = nemo_window_slot_get_window (slot);
 
     if (slot == nemo_window_get_active_slot (window)) {
-        NemoWindowPane *pane;
         const gchar *view_id;
 
         if (slot->content_view == NULL) {
             return;
         }
 
-        pane = nemo_window_get_active_pane(window);
         view_id = nemo_window_slot_get_content_view_id (slot);
 
-        toolbar_set_view_button (action_for_view_id (view_id), pane);
+        toolbar_set_view_button (action_for_view_id (view_id), window);
         menu_set_view_selection (action_for_view_id (view_id), window);
     }
 }
@@ -1693,6 +1697,7 @@ nemo_window_slot_set_viewed_file (NemoWindowSlot *slot,
 	nemo_file_ref (file);
 
 	cancel_sync_view_type_callback (slot);
+    cancel_sync_show_thumbnail_callback (slot);
 
 	if (slot->viewed_file != NULL) {
 		nemo_file_monitor_remove (slot->viewed_file,

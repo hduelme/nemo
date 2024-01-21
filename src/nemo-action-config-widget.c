@@ -35,6 +35,7 @@ action_proxy_free (ActionProxy *proxy)
     g_clear_pointer (&proxy->stock_id, g_free);
     g_clear_pointer (&proxy->icon_name, g_free);
     g_clear_pointer (&proxy->filename, g_free);
+    g_slice_free (ActionProxy, proxy);
 }
 
 static GtkWidget *
@@ -150,6 +151,7 @@ make_action_proxy (const gchar *filename, const gchar *fullpath)
     proxy->filename = g_strdup (filename);
 
     g_free (name);
+    g_free (comment);
     g_free (icon_name);
     g_free (stock_id);
     g_key_file_free (key_file);
@@ -221,7 +223,7 @@ refresh_widget (NemoActionConfigWidget *widget)
     data_dirs = (gchar **) g_get_system_data_dirs ();
 
     for (i = 0; i < g_strv_length (data_dirs); i++) {
-        path = g_build_filename (data_dirs[i], "nemo", "actions", NULL);
+        path = nemo_action_manager_get_system_directory_path (data_dirs[i]);
         populate_from_directory (widget, path);
         g_clear_pointer (&path, g_free);
     }
@@ -390,7 +392,7 @@ static void setup_dir_monitors (NemoActionConfigWidget *widget)
 
     guint i;
     for (i = 0; i < g_strv_length (data_dirs); i++) {
-        gchar *path = g_build_filename (data_dirs[i], "nemo", "actions", NULL);
+        gchar *path = nemo_action_manager_get_system_directory_path (data_dirs[i]);
         try_monitor_path (widget, path);
         g_free (path);
     }
@@ -452,7 +454,7 @@ nemo_action_config_widget_init (NemoActionConfigWidget *self)
     g_free (title);
     g_free (markup);
 
-    GtkWidget *widget = gtk_button_new_from_icon_name ("folder", GTK_ICON_SIZE_BUTTON);
+    GtkWidget *widget = gtk_button_new_from_icon_name ("folder-symbolic", GTK_ICON_SIZE_BUTTON);
 
     GtkWidget *bb = nemo_config_base_widget_get_buttonbox (NEMO_CONFIG_BASE_WIDGET (self));
     gtk_box_pack_end (GTK_BOX (bb),

@@ -284,16 +284,7 @@ static void setup_dir_monitors (NemoScriptConfigWidget *widget)
 {
     widget->dir_monitors = NULL;
 
-    gchar **data_dirs = (gchar **) g_get_system_data_dirs ();
-
-    guint i;
-    for (i = 0; i < g_strv_length (data_dirs); i++) {
-        gchar *path = g_build_filename (data_dirs[i], "nemo", "actions", NULL);
-        try_monitor_path (widget, path);
-        g_free (path);
-    }
-
-    gchar *path = g_build_filename (g_get_user_data_dir (), "nemo", "actions", NULL);
+    gchar *path = nemo_get_scripts_directory_path ();
     try_monitor_path (widget, path);
     g_free (path);
 }
@@ -350,7 +341,7 @@ nemo_script_config_widget_init (NemoScriptConfigWidget *self)
     g_free (title);
     g_free (markup);
 
-    GtkWidget *widget = gtk_button_new_from_icon_name ("folder", GTK_ICON_SIZE_BUTTON);
+    GtkWidget *widget = gtk_button_new_from_icon_name ("folder-symbolic", GTK_ICON_SIZE_BUTTON);
 
     GtkWidget *bb = nemo_config_base_widget_get_buttonbox (NEMO_CONFIG_BASE_WIDGET (self));
     gtk_box_pack_end (GTK_BOX (bb),
