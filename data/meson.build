@@ -17,8 +17,8 @@ desktopFiles = [
   ),
 
   configure_file(
-    input : 'nemo.desktop.in',
-    output: 'nemo.desktop',
+    input : 'org.Nemo.desktop.in',
+    output: 'org.Nemo.desktop',
     configuration: dataConf,
   )
 ]

@@ -77,6 +77,10 @@
 #include <math.h>
 #include <sys/time.h>
 
+#ifdef HAVE_GTK_LAYER_SHELL
+#include <gtk-layer-shell/gtk-layer-shell.h>
+#endif
+
 #define MAX_TITLE_LENGTH 180
 
 /* Forward and back buttons on the mouse */
@@ -618,6 +622,18 @@ nemo_window_constructed (GObject *self)
 
 	window = NEMO_WINDOW (self);
 	application = nemo_application_get_singleton ();
+
+#ifdef HAVE_GTK_LAYER_SHELL
+	if (gtk_layer_is_supported() && window->details->disable_chrome) {
+		gtk_layer_init_for_window(GTK_WINDOW(window));
+		gtk_layer_set_namespace(GTK_WINDOW(window), _("Nemo"));
+		gtk_layer_set_layer(GTK_WINDOW(window), GTK_LAYER_SHELL_LAYER_BOTTOM);
+		gtk_layer_set_margin(GTK_WINDOW(window), GTK_LAYER_SHELL_EDGE_TOP, 0);
+		for (int anchor = 0; anchor < 4; anchor++) {
+			gtk_layer_set_anchor(GTK_WINDOW(window), anchor, 1);
+		}
+	}
+#endif
 
 	G_OBJECT_CLASS (nemo_window_parent_class)->constructed (self);
 	gtk_window_set_application (GTK_WINDOW (window), GTK_APPLICATION (application));
@@ -2326,58 +2342,17 @@ nemo_window_set_ignore_meta_zoom_level (NemoWindow *window, gint level)
     window->details->ignore_meta_zoom_level = level;
 }
 
-/* FIXME:
- *
- * Remove this and just use g_list_copy_deep
- * when we no longer need to support GLib < 2.34
- *
- */
-
-static GList *
-list_copy_deep (GList *list, GCopyFunc func, gpointer user_data)
-{
-  GList *new_list = NULL;
-
-  if (list)
-    {
-      GList *last;
-
-      new_list = g_slice_new (GList);
-      if (func)
-        new_list->data = func (list->data, user_data);
-      else
-        new_list->data = list->data;
-      new_list->prev = NULL;
-      last = new_list;
-      list = list->next;
-      while (list)
-    {
-      last->next = g_slice_new (GList);
-      last->next->prev = last;
-      last = last->next;
-      if (func)
-        last->data = func (list->data, user_data);
-      else
-        last->data = list->data;
-      list = list->next;
-    }
-      last->next = NULL;
-    }
-
-  return new_list;
-}
-
 GList *
 nemo_window_get_ignore_meta_visible_columns (NemoWindow *window)
 {
-    return list_copy_deep (window->details->ignore_meta_visible_columns, (GCopyFunc) g_strdup, NULL);
+    return g_list_copy_deep (window->details->ignore_meta_visible_columns, (GCopyFunc) g_strdup, NULL);
 }
 
 void
 nemo_window_set_ignore_meta_visible_columns (NemoWindow *window, GList *list)
 {
     GList *old = window->details->ignore_meta_visible_columns;
-    window->details->ignore_meta_visible_columns = list != NULL ? list_copy_deep (list, (GCopyFunc) g_strdup, NULL) :
+    window->details->ignore_meta_visible_columns = list != NULL ? g_list_copy_deep (list, (GCopyFunc) g_strdup, NULL) :
                                                                   NULL;
     if (old != NULL)
         g_list_free_full (old, g_free);
@@ -2386,14 +2361,14 @@ nemo_window_set_ignore_meta_visible_columns (NemoWindow *window, GList *list)
 GList *
 nemo_window_get_ignore_meta_column_order (NemoWindow *window)
 {
-    return list_copy_deep (window->details->ignore_meta_column_order, (GCopyFunc) g_strdup, NULL);
+    return g_list_copy_deep (window->details->ignore_meta_column_order, (GCopyFunc) g_strdup, NULL);
 }
 
 void
 nemo_window_set_ignore_meta_column_order (NemoWindow *window, GList *list)
 {
     GList *old = window->details->ignore_meta_column_order;
-    window->details->ignore_meta_column_order = list != NULL ? list_copy_deep (list, (GCopyFunc) g_strdup, NULL) :
+    window->details->ignore_meta_column_order = list != NULL ? g_list_copy_deep (list, (GCopyFunc) g_strdup, NULL) :
                                                                NULL;
     if (old != NULL)
         g_list_free_full (old, g_free);
